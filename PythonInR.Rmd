@@ -1,0 +1,383 @@
+---
+title: "Incorporating Python in R"
+author: "Pan Liu"
+date: "April, 2019"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(reticulate)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is a brief tutorial on how to incorporate Python in R, under Window environment. We assume you already have basic knowledge on R (R markdown) and Python.
+
+The package [**reticulate**](https://rstudio.github.io/reticulate/) enables us to use Python in R by various ways.
+
+According to the apparent way of coding and interacting with Python, I personally categorize them into 3 approaches: 1) Using Python code chunk, 2) Reuse stand-alone Python script, and 3) Embedding Python in R script.\
+All the 3 will be introduced in this tutorial, together with some explanations of correlated technical issues.\
+At the end, an exemplary data analysis case will be performed to demonstrate the procedure.  
+
+## Environment Set Up
+R markdown supports multiple languages including Python, Julia, C++, SQL, etc. On the background it's the [**knitr**](https://yihui.name/knitr/) package which provides those language engines. For Python, the default engine comes from the `reticulate`, after knitr version 1.18.\
+We can also use Python in ordinary R script, as we will introduce later.
+
+The engine uses the Python as external interpreter. We assume that you already have Python installed in your system. By default, the engine will find and use the the version of Python registered on the PATH variable of your system. 
+
+You can check where it is:
+```{r}
+Sys.which("python") 
+```
+If your Python was correctly installed, you don't need any extra configuration to be able to use Python in R. 
+
+### For more advanced users:
+
+If you have multiple versions of Python on your computer, you can choose to use the one you prefer. Suppose the path of that version of Python is '/xxx/xxx/xxx'. You can either specify its path in the chunk option `{python, engine.path = '/xxx/xxx/xxx'}`, or you can use the `use_python()` function:
+```{r message=FALSE, warning=FALSE}
+library(reticulate)
+use_python('/xxx/xxx/xxx')
+```
+Please refer to the following links if you want more information about [Python version configuration](https://rstudio.github.io/reticulate/articles/versions.html) and related [Python package installation](https://rstudio.github.io/reticulate/articles/python_packages.html) issues.
+
+If you use knitr version latter than 1.18, the default Python engine comes from the package reticulate. If you are using knitr of version prior to 1.18, you can add this code to enable the reticulate Python engine:
+```{r eval=FALSE}
+knitr::knit_engines$set(python = reticulate::eng_python)
+```
+On the other hand, if you don't want to use reticulate engine, you can disable it:
+```{r eval=FALSE}
+knitr::opts_chunk$set(python.reticulate=F)
+```
+
+```{r include=FALSE}
+# Make sure to change the engine back
+knitr::knit_engines$set(python = reticulate::eng_python)
+```
+
+## Use Python Code Chunk in R Markdown
+Personally, I think using Python Code chunk is the most convenient and straightforward approach of incorporating Python in R.\
+Python code chunks work exactly like R code chunks.
+Inside the Python code chunk, you can just write normal Python code directly: you can define variables, use Python packages, functions, etc.
+
+### Example
+Here is an example of Python code chunk:
+```{python}
+import pandas as pd
+a = 3
+datrain = pd.read_csv('datrain.txt', sep=' ')  #specify the separater if it's not ','! 
+print(datrain.head())
+```
+
+### Python plot: special notice for Anaconda users
+Plots in Python chunk are supposed to be run and shown normally as we would expect for R plots.
+e.g. Plot bar chart of y
+```{python}
+import seaborn as sns
+sns.distplot(datrain['y'])
+```
+
+However, if you use Anaconda for Python installation, like I did, you might find an error occurring when trying to include Python plot when knitring: `This application failed to start because it could not find or load the Qt platform plugin "windows" in "", Reinstalling ...` It took me a long time before I figure out, thanks to [this discuss in stackoverflow](https://stackoverflow.com/questions/50352614/r-markdown-how-can-i-make-rstudio-display-python-plots-inline-instead-of-in-new). 
+In short, we need to setup an environment variable, the code below can fix this:
+```{python}
+import os
+os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = 'C:/Users/panli/Anaconda3/Library/plugins/platforms'
+# You need to change the above path to the location of your Anaconda distribution.
+```
+
+### Pass objects between Python chunks:
+As we would expect, the objects (variables) generated in one code chunk can be called in later chunks. In the [document](https://rstudio.github.io/reticulate/articles/r_markdown.html#engine-setup) the authors say "Python chunks all execute within a single Python session so have access to all objects created in previous chunks." Yes, if we compile (click the `knit` button) the document, we will see the following chunk "remembers" the objects generated previously.
+
+```{python}
+a
+list(datrain.columns.values)  #column names
+type(datrain)
+```
+
+~~However, if we manually execute the code chunk by chunk in RStudio, we will find it doesn't work:  `NameError: name 'a' is not defined`. The objects created in previous Python chunk can not be passed to the following chunks when they are compiled separately.
+This is [an issue the knitr team is still work on](https://github.com/yihui/knitr/issues/1440).~~
+
+*! Revision*: I just found that they have recently fixed the above problem, great! But it requires that you install the [preview version 1.2 of RStudio](https://www.rstudio.com/products/rstudio/download/preview/).
+
+
+### Pass objects between Python and R chunks
+This can go both ways: we can pass Python objects to R, or inversely call R objects in Python. One thing different from passing within the same environment is that the type of object need to be converted, since the two language have different object types definition. Luckily, this type conversion will be automatically done when you call one object in another environment. For example, vector in R will be converted to and from list in Python; Python dictionary converted to and from R named list, etc.\
+(The automatic conversion works fun in most cases. For more details about type conversion, pls see: [link](https://rstudio.github.io/reticulate/articles/calling_python.html))
+
+* To call Python objects in R chunk, we can use the `py` object exported by the reticulate package:
+```{r}
+py$a
+class(py$datrain)  # we see the data type is correctly transformed
+summary(py$datrain$y)  
+```
+
+* You can also call R in Python chunk, using the `r` object:
+
+e.g. Define a vector in R:
+```{r}
+b <- c(1,2,3)
+```
+Call it in Python:
+```{python}
+r.b
+type(r.b)  # the type of R object is also correctly transformed in Python
+```
+~~Well, when running the chunks separately, the same problem of unable to pass data between chunks still persists here. So, you can only pass data between R chunks normally when you execute them chunk by chunk.~~
+
+*! Revision*: As said previously, the problem is fixed with the [preview version 1.2 of RStudio](https://www.rstudio.com/products/rstudio/download/preview/).
+
+## Reuse Stand-alone Python Script
+
+Sometimes you may want to reuse your existing Python code; or prefer to edit Python in a stand-alone script within a full-featured IDE, instead of using the Python chunk in R Markdown. This is also feasible with the help of the **reticulate** package!
+
+Technically there are 2 ways:
+
+### Sourcing Python script
+To execute a Python script and **import all Python objects in the Python session directly into R environment** (I only realize this later that it not only imports those objects created by this specific script you run, but also any other objects that you already created previously in the Python main session), we can use the `source_python()` function:
+
+e.g. We already have a Python script `testPy_1.py` where we defined a constant `k1` and a function `square()`:
+```{python eval=FALSE}
+# This Python chunk is not executed when Knitting 
+k1 = 3
+def square(a):
+  return a*a
+```
+Source the script in R, and we will see `k1` and `square()` are imported to the R environment:
+```{r}
+library(reticulate)
+source_python('testPy_1.py')
+#now the objects k and square() are available within R, you can call them directly:
+square(k1) 
+```
+
+### Executing Python script
+You can also run a Python script with function `py_run_file()` and access the Python objects created via the `py` object.\
+e.g. We have a Python script `testPy_2.py` where we defined a constant `k2` = 2. Run it in R:
+```{r}
+py_run_file("testPy_2.py")
+py$k2  #k2 accecible via the 'py' object
+```
+However, note that unlike previous sourcing function, when you use `py_run_file()`, the objects created in Python script are **not** directly imported into the R environment. Thus you can only access them via the `py` object, instead of calling them directly:
+```{r error=TRUE}
+k2
+```
+
+## Embedding Python in R Script
+If you don't like Python chunk in R markdown but still want to occasionally use Python code in R, there are ways to run Python code within R script.
+
+### Creating an interactive shell (REPL)
+A [read–eval–print loop (REPL)](https://en.wikipedia.org/w/index.php?title=Read%E2%80%93eval%E2%80%93print_loop&oldid=885750456) for Python in the R session is a shell where you can use Python interactively. It can be created with the `repl_python()` function.
+```{r eval=FALSE}
+repl_python()  #creat REPL
+c = [1, 2, 3]
+exit  #exit REPL after finishing writing Python
+```
+Somehow this **REPL doesn't function normally in R markdown**! I verified it works well in ordinary R script. Pls see the attached `testREPL.R` file.
+
+You can call the created objects in R via 'py' object:
+```{r eval=FALSE}
+py$c
+```
+The object created will persist in Python session after exit REPL. We can access it again in Python:
+```{r eval=FALSE}
+repl_python()
+c[0]
+exit
+```
+
+### Run snippets of Python code
+You can also run snippets of code using `py_run_string()` or `py_eval()` function.
+```{r}
+# py_run_string() enables you to execute a line of Python code
+py_run_string("x = 10")
+py_run_string("import numpy as np")
+py$x  #the objects created can be accessed via the object `py`
+
+# py_eval() returns the value of evaluating a line of Python code
+py_eval("np.sin(np.pi)", convert = TRUE)
+```
+
+### Importing Python packages into R
+
+Let's continue to say that you are not a fan of Python code chunk in R Markdown. In this case if you want to use certain nice Python packages, besides importing and using them within Python script, you can directly import them into R! \
+Simply use the `import()` function, like this:
+```{r}
+# e.g. you'd like to use numpy, you can import and rename it in R:
+np <- import("numpy")  
+#Then you can directly access the packages and its methods in R:
+np$sin(np$pi)
+```
+
+
+
+## Data Analysis Example: Wine Data
+Now let's perform a data analysis example to demonstrate the whole process, and illustrate some characteristics of R and Python along the way.
+
+### Data Preprocessing
+- Reading data using Python:
+```{python}
+import pandas as pd
+datrain = pd.read_csv('datrain.txt', sep=' ')  #specify the separater if it's not ','! 
+```
+- Inspect the data using Python:
+```{python}
+datrain.head()
+datrain.shape
+datrain.isnull().sum()  #check missing value
+```
+
+The above data loading and inspection process (even the syntax) would be quite similar if we use R.
+
+- Standardization etc.
+```{python}
+datrain['y'] = datrain['y'].astype('category')
+X_origin = datrain.loc[:, datrain.columns != 'y']
+y = datrain['y']
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X = scaler.fit_transform(X_origin)
+```
+
+
+### Graph
+R is designed to be good at graphical representation and visualization of data. You can often write brief code to obtain fancy graphs.\
+e.g. plot the correlation matrix in form of heatmap:
+```{r}
+heatmap(cor(py$X_origin), Colv = NA, Rowv= NA)
+```
+
+R has many handy packages dedicated to graphics, such as `ggplot2` etc.:
+```{r}
+data(attitude)
+library(ggplot2)
+library(reshape2)
+ggplot(melt(cor(py$X_origin)), aes(Var1, Var2)) +   
+     geom_tile(aes(fill = value))
+```
+
+In Python, there are also nice packages for visualization, like `seaborn`:
+```{python}
+import seaborn as sns
+sns.heatmap(datrain.corr(), annot=True)
+```
+
+
+### Model tuning and fitting
+Both Python and R have nice packages for ML. Python is probably a more dominant platform compared to R in this field. As an example, here we take the mainstream package from each: Python `sklearn` vs. R `caret`.
+
+Use artificial neural network (ANN) model as an example:
+
+- Python `sklearn`:
+```{python eval=FALSE}
+import time  #timing the process
+start_time = time.time()
+
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import RepeatedKFold
+nn = MLPClassifier()
+grid={'hidden_layer_sizes': [(8),(8,1),(8,3),(50),(50,1), (50,3)],
+'alpha': [0.001, 0.1, 0.3],
+'activation': ["logistic", "relu", "tanh"]
+}
+rkf = RepeatedKFold(n_splits=10, n_repeats=3, random_state=1001)
+gs = GridSearchCV(estimator=nn, param_grid = grid, scoring='accuracy', cv=rkf, n_jobs=-1) #n_jobs specifies using all but 1 cores for parallel computing
+gs.fit(X,y)
+end_time = time.time()
+runtime = end_time - start_time
+print(runtime)
+```
+```{python eval=FALSE}
+bestFit = gs.best_estimator_
+print(gs.best_params_)
+print(gs.best_score_)
+```
+With `sklearn`, we can turn various hyperparameters of the ANN model.
+It takes ~262 sec (run in Spyder IDE).\
+Best parameters obtained: {'activation': 'relu', 'alpha': 0.3, 'hidden_layer_sizes': (50, 3)}. Best accuracy: 0.562.
+
+However, R markdown seem to have problem dealing with the parallel processing in the `GridSearchCV()` function.
+
+We can try to run the above code in a standalone Python script:
+```{r eval=FALSE}
+source_python('nn.py')
+bestfit
+runtime
+```
+Still not working properly with the parallel computing issue.
+
+We make the grid search simpler (which correspond to what we can tune with 'caret'), and omit parallel computing:
+```{python warning=F, message=F, results='hide'}
+import time  #timing the process
+start_time = time.time()
+
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import RepeatedKFold
+nn = MLPClassifier()
+grid2={
+'hidden_layer_sizes': [(8),(50)],
+'alpha': [0.001, 0.1, 0.3]
+}
+rkf = RepeatedKFold(n_splits=10, n_repeats=3, random_state=1001)
+#gs2 = GridSearchCV(estimator=nn, param_grid = grid2, scoring='accuracy', cv=rkf, n_jobs=-1)
+# problem with parellel processing in Python code chunk.
+gs2 = GridSearchCV(estimator=nn, param_grid = grid2, scoring='accuracy', cv=rkf)
+gs2.fit(X,y)
+
+end_time = time.time()
+runtime2 = end_time - start_time
+print(runtime2)
+```
+it will take 28 sec in Python (run in Spyder). While 157 sec here, since we can't use parallel processing.
+```{python}
+gs2.best_params_
+gs2.best_score_
+runtime2
+```
+
+- Now let's tune the same model in R with `caret`:
+```{r}
+start_time <- Sys.time() #timing the process
+
+### Parallel Comouting Setting
+library(doParallel)
+#n_cores <- detectCores(logical = FALSE) - 1  #detecting physical cores of CPU
+n_cores <- detectCores() - 1
+registerDoParallel(cores = n_cores)  #multicore processing, use all but one core of your PC
+
+### neuralnet package
+library(neuralnet)  #catet can only tune it for regression. And only sizes are tunable.
+
+### nnet package
+library(nnet)  #only one layer, only size and alpha(decay) tunable.
+library(caret)
+control <- trainControl(method='repeatedcv', 
+                       number=10, 
+                       repeats=3,
+                       search='grid')
+nn_grid <- expand.grid(size=c(8,50),decay=c(0.001, 0.1, 0.3))
+set.seed(1001)
+NNFit <- train(y~., data = py$datrain, method='nnet', 
+              metric='Accuracy', tuneGrid=nn_grid, trControl=control)
+
+end_time <- Sys.time()
+runtime <- end_time - start_time
+print(runtime)
+```
+Takes 51s in R.
+```{r}
+res = NNFit$results
+res[which(res$Accuracy==min(res$Accuracy)), ]
+```
+
+
+
+
+
+
+
+
